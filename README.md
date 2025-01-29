@@ -46,55 +46,7 @@ Use **SystemVerilog** and **UVM (Universal Verification Methodology)** for the t
   - **Scoreboard**: Tracks and compares DUT behavior against a reference model.
 
 ## Code Implementation
-
-```verilog
-// Verification of a Power-Gated Flip-Flop Design Using SystemVerilog and UVM
-`timescale 1ns/1ps
-
-module power_gated_flip_flop (
-    input wire D,      // Data input
-    input wire clk,    // Clock signal
-    input wire enable, // Power gating control
-    input wire sleep,  // Sleep mode signal
-    output reg Q       // Data output
-);
-    reg retained_state;
-
-    always @(posedge clk or posedge sleep) begin
-        if (sleep) begin
-            retained_state <= Q; // Retain state during sleep
-        end else if (enable) begin
-            Q <= D; // Normal operation
-        end
-    end
-endmodule
-```
-
-```systemverilog
-// UVM-Based Testbench
-import uvm_pkg::*;
-`include "uvm_macros.svh"
-
-class flip_flop_test extends uvm_test;
-    `uvm_component_utils(flip_flop_test)
-    
-    function new(string name = "flip_flop_test", uvm_component parent);
-        super.new(name, parent);
-    endfunction
-
-    virtual function void build_phase(uvm_phase phase);
-        super.build_phase(phase);
-        // Instantiate UVM environment
-    endfunction
-
-    virtual task run_phase(uvm_phase phase);
-        phase.raise_objection(this);
-        // Implement test scenarios: normal operation, power gating, retention, wake-up
-        phase.drop_objection(this);
-    endtask
-endclass
-```
-
+### DUT
 ```verilog
 // Top-level module for simulation
 module testbench;
@@ -122,4 +74,142 @@ module testbench;
         $monitor("Time=%0t | D=%b | clk=%b | enable=%b | sleep=%b | Q=%b", $time, D, clk, enable, sleep, Q);
     end
 endmodule
+```
+### Testbench
+```systemverilog
+// Testbench of a Power-Gated Flip-Flop Design Using SystemVerilog 
+ module tb_power_gated_ff;
+
+    // Testbench signals
+    reg clk, D, enable, sleep;
+    wire Q;
+
+    // Instantiate DUT
+    power_gated_flip_flop uut (
+        .clk(clk),
+        .D(D),
+        .enable(enable),
+        .sleep(sleep),
+        .Q(Q)
+    );
+
+    // Clock generation: 10ns period
+    initial begin
+        clk = 0;
+        forever #5 clk = ~clk;
+    end
+
+    // Test stimulus
+    initial begin
+        // Initialize signals
+        D = 0; enable = 1; sleep = 0;
+
+        // Test case 1: Normal operation
+        #10 D = 1; #10 D = 0; #10 D = 1;
+
+        // Test case 2: Enter sleep mode
+        #10 sleep = 1; enable = 0; #20;
+
+        // Test case 3: Exit sleep mode
+        #10 sleep = 0; enable = 1; #20;
+
+        // Test case 4: Randomized inputs
+        repeat (5) begin
+            #10 D = $random; sleep = $random % 2; enable = $random % 2;
+        end
+
+        $finish;
+    end
+
+    // Monitor DUT output
+    initial begin
+        $monitor("Time: %0t | D: %b | enable: %b | sleep: %b | Q: %b", 
+                 $time, D, enable, sleep, Q);
+    end
+
+endmodule
+
+```
+## UVM Environment
+### 1. UVM Driver
+```systemverilog
+     class power_gated_ff_driver extends uvm_driver #(bit);
+    virtual power_gated_ff_if vif;  // Virtual interface
+
+    function new(string name, uvm_component parent);
+        super.new(name, parent);
+    endfunction
+
+    task run_phase(uvm_phase phase);
+        forever begin
+            vif.D <= $random;  // Random data
+            vif.sleep <= $random % 2;  // Random sleep
+            vif.enable <= $random % 2;  // Random enable
+            @(posedge vif.clk);
+        end
+    endtask
+endclass
+
+```
+### 2. UVM Monitor
+```systemverilog
+    class power_gated_ff_monitor extends uvm_monitor;
+    virtual power_gated_ff_if vif;
+    uvm_analysis_port #(bit) ap;
+
+    function new(string name, uvm_component parent);
+        super.new(name, parent);
+        ap = new("ap", this);
+    endfunction
+
+    task run_phase(uvm_phase phase);
+        forever begin
+            @(posedge vif.clk);
+            ap.write(vif.Q);  // Send output to scoreboard
+        end
+    endtask
+endclass
+
+```
+### 3. UVM Scoreboard
+```systemverilog
+   class power_gated_ff_scoreboard extends uvm_scoreboard;
+    uvm_analysis_export #(bit) ap;
+
+    function new(string name, uvm_component parent);
+        super.new(name, parent);
+    endfunction
+
+    task run_phase(uvm_phase phase);
+        bit expected, observed;
+
+        forever begin
+            expected = // Model-based expected behavior
+            ap.get(observed);
+            if (expected !== observed)
+                `uvm_error("Mismatch", $sformatf("Expected: %b, Observed: %b", expected, observed));
+        end
+    endtask
+endclass
+
+```
+### 4. UVM Test
+```systemverilog
+ class power_gated_ff_test extends uvm_test;
+    power_gated_ff_env env;
+
+    function new(string name, uvm_component parent);
+        super.new(name, parent);
+    endfunction
+
+    task run_phase(uvm_phase phase);
+        phase.raise_objection(this);
+        env = power_gated_ff_env::type_id::create("env");
+        env.build_phase(phase);
+        env.run_phase(phase);
+        phase.drop_objection(this);
+    endtask
+endclass
+
+
 ```
